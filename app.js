@@ -248,12 +248,17 @@
     const prevDoneOn = item.doneOn || null;
     const cardEl = listEl.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
 
-    // Tapping a finished item un-ticks one step
+    // Tapping a finished item puts it back on the list from zero
     if (before >= item.target) {
-      setCount(item, before - 1);
+      setCount(item, 0);
       save();
       render();
-      showToast(`${item.emoji} ${item.name}: back on the list`);
+      showToast(`${item.emoji} ${item.name}: back on the list`, () => {
+        setCount(item, before);
+        if (item.repeat === 'once') item.doneOn = prevDoneOn;
+        save();
+        render();
+      });
       return;
     }
 
