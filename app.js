@@ -1,3 +1,4 @@
+// © 2026 Carol Morris. All rights reserved.
 (() => {
   'use strict';
 
@@ -45,7 +46,7 @@
 
   // ---------- State ----------
   let today = dayKeyNow();
-  let state = load();
+  let state; // loaded once the checking helpers below are defined
   let doneOpen = false;
 
   function seed() {
@@ -72,22 +73,84 @@
     };
   }
 
-  function isValidState(s) {
-    return s && typeof s === 'object' && Array.isArray(s.items) && s.log && typeof s.log === 'object';
+  // Checks saved data and backup files field by field and rebuilds a clean copy.
+  // Anything unexpected is dropped or reset, so a broken or tampered file can't
+  // inject content or freeze the app. Returns null if the data isn't usable at all.
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const ID_RE = /^[a-z0-9]{1,40}$/i;
+  const isObj = (o) => o !== null && typeof o === 'object' && !Array.isArray(o);
+  const clampInt = (n, lo, hi) => (Number.isInteger(n) && n >= lo && n <= hi ? n : null);
+
+  function cleanItem(i) {
+    if (!isObj(i) || typeof i.id !== 'string' || !ID_RE.test(i.id)) return null;
+    if (typeof i.name !== 'string' || !i.name.trim()) return null;
+    const repeat = ['daily', 'days', 'once'].includes(i.repeat) ? i.repeat : 'daily';
+    const days = Array.isArray(i.days) ? [...new Set(i.days.filter((d) => clampInt(d, 0, 6) !== null))] : [];
+    const item = {
+      id: i.id,
+      name: i.name.trim().slice(0, 60),
+      emoji: typeof i.emoji === 'string' && i.emoji.length <= 16 && i.emoji.trim() ? i.emoji : '✨',
+      color: COLORS.includes(i.color) ? i.color : 'pink',
+      repeat: repeat === 'days' && !days.length ? 'daily' : repeat,
+      days: repeat === 'days' ? days : [],
+      target: repeat === 'once' ? 1 : (clampInt(i.target, 1, 12) || 1),
+      time: typeof i.time === 'string' && TIME_RE.test(i.time) ? i.time : '',
+      created: typeof i.created === 'string' && DATE_RE.test(i.created) ? i.created : today,
+    };
+    if (repeat === 'once') item.doneOn = typeof i.doneOn === 'string' && DATE_RE.test(i.doneOn) ? i.doneOn : null;
+    return item;
+  }
+
+  function cleanDayMap(m) {
+    const out = {};
+    if (!isObj(m)) return out;
+    Object.keys(m).slice(0, 5000).forEach((k) => {
+      if (!DATE_RE.test(k) || !isObj(m[k])) return;
+      const day = {};
+      Object.keys(m[k]).slice(0, 300).forEach((id) => {
+        const n = clampInt(m[k][id], 0, 12);
+        if (ID_RE.test(id) && n !== null) day[id] = n;
+      });
+      out[k] = day;
+    });
+    return out;
+  }
+
+  function sanitizeState(s) {
+    if (!isObj(s) || !Array.isArray(s.items)) return null;
+    const seen = new Set();
+    const items = [];
+    s.items.slice(0, 300).forEach((raw) => {
+      const it = cleanItem(raw);
+      if (it && !seen.has(it.id)) { seen.add(it.id); items.push(it); }
+    });
+    return {
+      version: 1,
+      theme: THEMES.some((t) => t.id === s.theme) ? s.theme : 'pastel',
+      items,
+      log: cleanDayMap(s.log),
+      snap: cleanDayMap(s.snap),
+    };
   }
 
   function load() {
+    let raw = null;
     try {
-      const raw = localStorage.getItem(STORE_KEY);
+      raw = localStorage.getItem(STORE_KEY);
       if (raw) {
-        const s = JSON.parse(raw);
-        if (isValidState(s)) { if (!s.snap) s.snap = {}; return s; }
+        const s = sanitizeState(JSON.parse(raw));
+        if (s) return s;
       }
     } catch (e) { /* fall through to seed */ }
+    // Never silently lose data: keep an unreadable copy aside before starting fresh.
+    if (raw) { try { localStorage.setItem(STORE_KEY + '-unreadable', raw); } catch (e) { /* ignore */ } }
     const s = seed();
     try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) { /* ignore */ }
     return s;
   }
+
+  state = load();
 
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -221,9 +284,20 @@
     }
   }
 
+  // Shows "Wednesday 4 November" when it fits on one line, otherwise "Wed 4 Nov".
+  function fitDate(d) {
+    const el = $('dateLabel');
+    const long = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    const short = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    el.textContent = long;
+    const fits = el.scrollWidth <= el.clientWidth + 1;
+    el.textContent = fits ? long : short;
+    el.setAttribute('aria-label', long);
+  }
+
   function renderHeader(due) {
     const d = parseKey(today);
-    $('dateLabel').textContent = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    fitDate(d);
     const h = new Date().getHours();
     $('greeting').textContent = h < RESET_HOUR ? 'Still today 🌙' : h < 12 ? 'Good morning ☀️' : h < 18 ? 'Good afternoon 🌤️' : 'Good evening 🌙';
 
@@ -673,12 +747,12 @@
     const file = $('importFile').files[0];
     $('importFile').value = '';
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { showToast('⚠️ That file is too big to be a backup'); return; }
     try {
-      const s = JSON.parse(await file.text());
-      if (!isValidState(s)) throw new Error('bad file');
-      if (!confirm('Replace everything on this phone with this backup?')) return;
+      const s = sanitizeState(JSON.parse(await file.text()));
+      if (!s) throw new Error('bad file');
+      if (!confirm(`Replace everything on this phone with this backup (${s.items.length} tasks)?`)) return;
       state = s;
-      if (!state.snap) state.snap = {};
       cleanup();
       save();
       applyTheme();
@@ -920,7 +994,12 @@
   };
   $('habitChips').addEventListener('click', pickHabit);
   $('habitRows').addEventListener('click', pickHabit);
-  window.addEventListener('resize', () => { if (histOpen) renderHistory(); });
+  window.addEventListener('resize', () => {
+    fitDate(parseKey(today));
+    if (histOpen) renderHistory();
+  });
+  // Re-check once the font has loaded, because it changes the text width
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitDate(parseKey(today)));
 
   // ---------- Day rollover ----------
   function checkDay() {

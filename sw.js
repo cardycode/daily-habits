@@ -1,13 +1,15 @@
+// © 2026 Carol Morris. All rights reserved.
 // Offline support. When the phone is online, the app always loads the newest files
 // from the website (skipping the browser's own cache). When offline, or if the network
 // takes longer than 3 seconds, it falls back to the last saved copy.
-const CACHE = 'daily-habits-v4';
+const CACHE = 'daily-habits-v7';
 const SHELL = [
   './',
   'index.html',
   'styles.css',
   'app.js',
   'manifest.webmanifest',
+  'fonts/roboto-mono.woff2',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/maskable-512.png',
@@ -40,6 +42,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const sameOrigin = new URL(req.url).origin === self.location.origin;
+  if (!sameOrigin) return; // the app never loads anything from other websites
 
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);

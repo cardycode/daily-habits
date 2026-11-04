@@ -1,7 +1,10 @@
 <!doctype html>
+<!-- © 2026 Carol Morris. All rights reserved. -->
 <html lang="en" data-theme="pastel">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#fdf6f0">
   <meta name="description" content="A simple, colourful daily habit and to-do tracker.">
@@ -9,9 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="preload" href="fonts/roboto-mono.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -120,6 +121,7 @@
     </div>
 
     <p class="hint small">The list resets every day at 4 AM. Tap a task to tick it. Hold a task to edit it. Swipe a task left to delete it.</p>
+    <p class="copyright">© 2026 Carol Morris. All rights reserved.</p>
   </section>
 
   <!-- History page -->
@@ -149,6 +151,7 @@
 
       <div class="section-title">Your habits</div>
       <div id="habitRows"></div>
+      <p class="copyright">© 2026 Carol Morris. All rights reserved.</p>
     </div>
   </section>
 

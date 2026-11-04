@@ -11,3 +11,7 @@ A one-screen daily habit and to-do tracker. It installs on Android as an app fro
 1. Edit the files.
 2. In `sw.js`, change `CACHE = 'daily-habits-v1'` to the next number, for example `v2`.
 3. Upload the changed files to GitHub. Phones pick up the new version the second time you open the app.
+
+## Copyright
+
+© 2026 Carol Morris. All rights reserved. See `LICENSE`. The Roboto Mono font is licensed separately under the Apache License 2.0 (`fonts/LICENSE-RobotoMono.txt`).
