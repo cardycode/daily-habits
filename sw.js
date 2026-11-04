@@ -1,6 +1,7 @@
-// Offline support: serve the app from the cache, refresh the cache in the background.
-// Bump CACHE when you change the app so phones pick up the new files.
-const CACHE = 'daily-habits-v3';
+// Offline support. When the phone is online, the app always loads the newest files
+// from the website (skipping the browser's own cache). When offline, or if the network
+// takes longer than 3 seconds, it falls back to the last saved copy.
+const CACHE = 'daily-habits-v4';
 const SHELL = [
   './',
   'index.html',
@@ -13,7 +14,11 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -24,18 +29,39 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then((v) => { clearTimeout(t); resolve(v); }, (err) => { clearTimeout(t); reject(err); });
+  });
+}
+
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(e.request, { ignoreSearch: true });
-      const network = fetch(e.request)
-        .then((res) => {
-          if (res && (res.ok || res.type === 'opaque')) cache.put(e.request, res.clone());
-          return res;
-        })
-        .catch(() => cached || (e.request.mode === 'navigate' ? cache.match('index.html') : undefined));
-      return cached || network;
-    })
-  );
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const sameOrigin = new URL(req.url).origin === self.location.origin;
+
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    // Same-origin files: ask the server for the newest copy, ignoring the browser cache.
+    const fresh = sameOrigin
+      ? fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' })
+      : fetch(req);
+    const update = fresh.then((res) => {
+      if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
+      return res;
+    });
+    e.waitUntil(update.catch(() => {}));
+    try {
+      return await withTimeout(update, 3000);
+    } catch (err) {
+      const cached = await cache.match(req, { ignoreSearch: true });
+      if (cached) return cached;
+      if (req.mode === 'navigate') {
+        const shell = await cache.match('index.html');
+        if (shell) return shell;
+      }
+      return update; // nothing cached yet, so keep waiting for the network
+    }
+  })());
 });
