@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en" data-theme="pastel">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fdf6f0">
+  <meta name="description" content="A simple, colourful daily habit and to-do tracker.">
+  <title>Today</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="top-row">
+        <div>
+          <div class="greeting" id="greeting"></div>
+          <h1 class="date" id="dateLabel"></h1>
+        </div>
+        <button class="icon-btn" id="settingsBtn" type="button" aria-label="Settings">🎨</button>
+      </div>
+      <div class="progress" role="progressbar" aria-label="Today's progress" aria-valuemin="0" aria-valuemax="100" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-label" id="progressLabel"></div>
+    </header>
+
+    <main id="list" aria-live="polite"></main>
+  </div>
+
+  <button class="fab" id="addBtn" type="button" aria-label="Add a task">+</button>
+
+  <div class="toast" id="toast" role="status">
+    <span id="toastText"></span>
+    <button type="button" id="toastUndo">Undo</button>
+  </div>
+
+  <div class="backdrop" id="backdrop"></div>
+
+  <!-- Add / edit sheet -->
+  <section class="sheet" id="editSheet" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="editTitle">New task</h2>
+
+    <div class="name-row">
+      <button class="emoji-btn" id="emojiBtn" type="button" aria-label="Choose an emoji">✨</button>
+      <input id="nameInput" type="text" placeholder="What do you want to do?" maxlength="60" autocomplete="off" enterkeyhint="done">
+    </div>
+    <div class="emoji-panel" id="emojiPanel" hidden>
+      <div class="emoji-grid" id="emojiGrid"></div>
+      <input id="emojiCustom" type="text" placeholder="Or type any emoji here" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <div class="label">Colour</div>
+      <div class="swatches" id="colorSwatches"></div>
+    </div>
+
+    <div class="field">
+      <div class="label">Repeats</div>
+      <div class="seg" id="repeatSeg">
+        <button type="button" data-v="daily">Every day</button>
+        <button type="button" data-v="days">Some days</button>
+        <button type="button" data-v="once">Today only</button>
+      </div>
+      <div class="day-chips" id="dayChips" hidden></div>
+    </div>
+
+    <div class="field" id="timesField">
+      <div class="label">Times a day</div>
+      <div class="stepper">
+        <button type="button" id="timesMinus" aria-label="Fewer times">−</button>
+        <span id="timesVal">1</span>
+        <button type="button" id="timesPlus" aria-label="More times">+</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="label" for="timeInput">Time <span class="optional">optional</span></label>
+      <div class="time-row">
+        <input id="timeInput" type="time">
+        <button type="button" class="link-btn" id="timeClear">Clear</button>
+      </div>
+    </div>
+
+    <button type="button" class="primary-btn" id="saveBtn">Save</button>
+    <div class="edit-extra" id="editExtra">
+      <button type="button" class="ghost-btn" id="moveUpBtn">⬆️ Move up</button>
+      <button type="button" class="ghost-btn" id="moveDownBtn">⬇️ Move down</button>
+      <button type="button" class="ghost-btn danger" id="deleteBtn">🗑️ Delete</button>
+    </div>
+  </section>
+
+  <!-- Settings sheet -->
+  <section class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="settingsTitle">Look and backup</h2>
+
+    <div class="field">
+      <div class="label">Theme</div>
+      <div class="theme-grid" id="themeGrid"></div>
+    </div>
+
+    <div class="field">
+      <div class="label">Backup</div>
+      <p class="hint">Your habits and history live only on this phone. Save a backup now and then so you never lose them.</p>
+      <div class="backup-row">
+        <button type="button" class="ghost-btn" id="exportBtn">💾 Save backup</button>
+        <button type="button" class="ghost-btn" id="importBtn">📂 Restore backup</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+      </div>
+    </div>
+
+    <p class="hint small">The list resets every day at 4 AM. Tap a task to tick it. Hold a task to edit it. Swipe a task left to delete it.</p>
+  </section>
+
+  <!-- Everything-done celebration -->
+  <div class="celebrate" id="celebrate" role="dialog" aria-modal="true" aria-labelledby="celebrateTitle">
+    <div class="celebrate-card">
+      <div class="celebrate-emoji">🎉</div>
+      <h2 id="celebrateTitle">List cleared!</h2>
+      <p id="celebrateText"></p>
+      <button type="button" class="primary-btn" id="celebrateClose">Yay</button>
+    </div>
+  </div>
+
+  <div id="fx" aria-hidden="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
