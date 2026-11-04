@@ -1,6 +1,6 @@
 // Offline support: serve the app from the cache, refresh the cache in the background.
 // Bump CACHE when you change the app so phones pick up the new files.
-const CACHE = 'daily-habits-v1';
+const CACHE = 'daily-habits-v2';
 const SHELL = [
   './',
   'index.html',

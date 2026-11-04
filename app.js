@@ -14,7 +14,7 @@
     { id: 'pastel', name: '🌸 Pastel', bg: '#fdf6f0', text: '#3d3550', dots: ['#ff8fab', '#ffb26b', '#4fcf8d', '#9b7bff'] },
     { id: 'bold', name: '🌈 Bold', bg: '#fff8e7', text: '#1f1a2e', dots: ['#ff3d7f', '#ffc400', '#1e88ff', '#00b86f'] },
     { id: 'neon', name: '🌙 Neon', bg: '#0d0b1a', text: '#f2efff', dots: ['#ff4fd8', '#4dd9ff', '#3dffa2', '#f9f871'] },
-    { id: 'neutral', name: '🤍 Neutral', bg: '#f6f4f1', text: '#2b2926', dots: ['#c08a7e', '#b9a25a', '#7fa077', '#7895ad'] },
+    { id: 'neutral', name: '🖤 Neutral', bg: '#f4f4f4', text: '#111111', dots: ['#111111', '#555555', '#999999', '#d4d4d4'] },
   ];
   const EMOJIS = [
     '✨', '🪥', '🛏️', '📝', '💊', '💪', '☀️', '🐶', '🦮', '🧘‍♀️', '🏋️‍♀️', '🏃‍♀️',
@@ -68,6 +68,7 @@
         mk('Gym workout', '🏋️‍♀️', 'lavender', { repeat: 'days', days: [1, 3, 0] }),
       ],
       log: {},
+      snap: {},
     };
   }
 
@@ -80,7 +81,7 @@
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         const s = JSON.parse(raw);
-        if (isValidState(s)) return s;
+        if (isValidState(s)) { if (!s.snap) s.snap = {}; return s; }
       }
     } catch (e) { /* fall through to seed */ }
     const s = seed();
@@ -206,6 +207,18 @@
     }
     listEl.innerHTML = html;
     renderHeader(due);
+    recordSnapshot(due);
+  }
+
+  // Records what was on today's list (item id -> times needed), so the history
+  // page knows which days each task was due, even after a task is edited or deleted.
+  function recordSnapshot(due) {
+    const snap = {};
+    due.forEach((i) => { snap[i.id] = i.target; });
+    if (JSON.stringify(snap) !== JSON.stringify(state.snap[today] || {})) {
+      state.snap[today] = snap;
+      save();
+    }
   }
 
   function renderHeader(due) {
@@ -431,33 +444,36 @@
     if (e.target.closest('#doneToggle')) { doneOpen = !doneOpen; render(); }
   });
 
-  // ---------- Sheets ----------
-  let openSheetEl = null;
-  function openSheet(el) {
-    if (openSheetEl) hideSheet();
-    openSheetEl = el;
-    el.classList.add('show');
-    $('backdrop').classList.add('show');
-    history.pushState({ sheet: true }, '');
+  // ---------- Overlays (sheets and the history page) ----------
+  // Each overlay adds a browser history entry, so the phone's Back button closes it.
+  const overlays = [];
+  function pushOverlay(hide) {
+    overlays.push(hide);
+    history.pushState({ overlay: overlays.length }, '');
   }
-  function hideSheet() {
-    if (!openSheetEl) return;
-    openSheetEl.classList.remove('show');
-    $('backdrop').classList.remove('show');
-    openSheetEl = null;
-    if (document.activeElement) document.activeElement.blur();
-  }
-  function closeSheet() {
-    if (!openSheetEl) return;
-    hideSheet();
-    if (history.state && history.state.sheet) history.back();
-  }
+  function closeOverlay() { if (overlays.length) history.back(); }
   window.addEventListener('popstate', () => {
-    if (openSheetEl) hideSheet();
+    const hide = overlays.pop();
+    if (hide) hide();
     else if ($('celebrate').classList.contains('show')) $('celebrate').classList.remove('show');
   });
-  $('backdrop').addEventListener('click', closeSheet);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlay(); });
+
+  let sheetOpen = false;
+  function openSheet(el) {
+    if (sheetOpen) return;
+    sheetOpen = true;
+    el.classList.add('show');
+    $('backdrop').classList.add('show');
+    pushOverlay(() => {
+      el.classList.remove('show');
+      $('backdrop').classList.remove('show');
+      sheetOpen = false;
+      if (document.activeElement) document.activeElement.blur();
+    });
+  }
+  const closeSheet = closeOverlay;
+  $('backdrop').addEventListener('click', closeOverlay);
 
   // ---------- Add / edit ----------
   let draft = null;
@@ -657,6 +673,7 @@
       if (!isValidState(s)) throw new Error('bad file');
       if (!confirm('Replace everything on this phone with this backup?')) return;
       state = s;
+      if (!state.snap) state.snap = {};
       cleanup();
       save();
       applyTheme();
@@ -667,6 +684,238 @@
       showToast('⚠️ That file is not a backup from this app');
     }
   });
+
+  // ---------- History page ----------
+  let histRange = 30;
+  let histSel = 'all'; // 'all' or an item id
+  let histOpen = false;
+
+  const shortDate = (k) => parseKey(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const longDate = (k) => parseKey(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const habitsOnly = () => state.items.filter((i) => i.repeat !== 'once');
+
+  // Value for one day, from 0 to 1, or a reason there's no value
+  function dayPoint(key, sel) {
+    const snap = state.snap[key];
+    const log = state.log[key] || {};
+    if (!snap) return { key, v: null, why: 'none' };
+    if (sel === 'all') {
+      const ids = Object.keys(snap);
+      if (!ids.length) return { key, v: null, why: 'empty' };
+      const done = ids.filter((id) => (log[id] || 0) >= snap[id]).length;
+      return { key, v: done / ids.length, done, total: ids.length };
+    }
+    if (!(sel in snap)) return { key, v: null, why: 'rest' };
+    const target = snap[sel];
+    const c = Math.min(log[sel] || 0, target);
+    return { key, v: c / target, done: c, total: target };
+  }
+
+  function rangeKeys(n) {
+    const keys = [];
+    for (let i = n - 1; i >= 0; i--) keys.push(addDays(today, -i));
+    return keys;
+  }
+
+  function bestStreak(id) {
+    const keys = Object.keys(state.snap).sort();
+    let run = 0;
+    let best = 0;
+    keys.forEach((k) => {
+      const p = dayPoint(k, id);
+      if (p.v === null) return; // not due that day, so the streak carries on
+      if (p.v >= 1) { run++; best = Math.max(best, run); }
+      else if (k !== today) run = 0;
+    });
+    return best;
+  }
+
+  function openHistory() {
+    histOpen = true;
+    $('historyPage').classList.add('show');
+    document.body.classList.add('no-scroll');
+    renderHistory();
+    pushOverlay(() => {
+      histOpen = false;
+      $('historyPage').classList.remove('show');
+      document.body.classList.remove('no-scroll');
+    });
+  }
+  $('historyBtn').addEventListener('click', openHistory);
+  $('historyBack').addEventListener('click', closeOverlay);
+
+  function renderHistory() {
+    if (!histOpen) return;
+    if (histSel !== 'all' && !find(histSel)) histSel = 'all';
+    const habits = habitsOnly();
+
+    $('rangeSeg').querySelectorAll('button').forEach((b) => {
+      const on = Number(b.dataset.r) === histRange;
+      b.classList.toggle('sel', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+
+    $('habitChips').innerHTML = [`<button type="button" class="chip${histSel === 'all' ? ' sel' : ''}" data-h="all">⭐ Everything</button>`]
+      .concat(habits.map((h) => `<button type="button" class="chip${histSel === h.id ? ' sel' : ''}" data-h="${esc(h.id)}">${esc(h.emoji)} ${esc(h.name)}</button>`))
+      .join('');
+
+    const keys = rangeKeys(histRange);
+    const points = keys.map((k) => dayPoint(k, histSel));
+    const valued = points.filter((p) => p.v !== null);
+    const avg = valued.length ? Math.round((valued.reduce((a, p) => a + p.v, 0) / valued.length) * 100) : null;
+
+    let tiles;
+    if (histSel === 'all') {
+      const perfect = valued.filter((p) => p.v >= 1).length;
+      tiles = [
+        ['Average day', avg === null ? '–' : avg + '%'],
+        ['Perfect days', String(perfect)],
+        ['Days tracked', String(valued.length)],
+      ];
+      $('chartTitle').textContent = 'Share of your list done each day';
+    } else {
+      const item = find(histSel);
+      const fullDays = valued.filter((p) => p.v >= 1).length;
+      tiles = [
+        ['Done', `${fullDays} of ${valued.length} days`],
+        ['Streak now', `🔥 ${streak(item)}`],
+        ['Best streak', `🏆 ${bestStreak(item.id)}`],
+      ];
+      $('chartTitle').textContent = item.target > 1
+        ? `${item.emoji} ${item.name}: share of ${item.target} times done each day`
+        : `${item.emoji} ${item.name}: done each day`;
+    }
+    $('historyStats').innerHTML = tiles.map(([l, v]) => `<div class="stat"><div class="stat-label">${l}</div><div class="stat-value">${v}</div></div>`).join('');
+
+    drawChart(points);
+
+    // Per-habit rows: completion rate over the selected range
+    $('habitRows').innerHTML = habits.length ? habits.map((h) => {
+      const ps = keys.map((k) => dayPoint(k, h.id)).filter((p) => p.v !== null);
+      const rate = ps.length ? Math.round((ps.filter((p) => p.v >= 1).length / ps.length) * 100) : null;
+      const st = streak(h);
+      return `
+        <button type="button" class="hrow c-${esc(h.color)}${histSel === h.id ? ' sel' : ''}" data-h="${esc(h.id)}">
+          <span class="hrow-emoji">${esc(h.emoji)}</span>
+          <span class="hrow-main">
+            <span class="hrow-name">${esc(h.name)}</span>
+            <span class="hrow-bar"><span style="width:${rate || 0}%"></span></span>
+          </span>
+          <span class="hrow-stats">
+            <span class="hrow-rate">${rate === null ? '–' : rate + '%'}</span>
+            ${st >= 1 ? `<span class="hrow-streak">🔥 ${st}</span>` : ''}
+          </span>
+        </button>`;
+    }).join('') : '<p class="hint">Add a daily habit to see its history here.</p>';
+  }
+
+  function drawChart(points) {
+    const wrap = $('chartWrap');
+    const W = Math.max(280, wrap.clientWidth || 320);
+    const H = 210;
+    const padL = 40, padR = 6, padT = 12, padB = 28;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+    const base = padT + plotH;
+    const n = points.length;
+    const slot = plotW / n;
+    const gap = slot > 6 ? 2 : 1;
+    const bw = Math.max(1, Math.min(24, slot - gap));
+    const y = (v) => base - v * plotH;
+    const any = points.some((p) => p.v !== null);
+
+    let svg = '';
+    [0, 0.5, 1].forEach((t) => {
+      svg += `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" class="grid"/>`;
+      svg += `<text x="${padL - 8}" y="${y(t) + 4}" text-anchor="end" class="axis">${t * 100}%</text>`;
+    });
+
+    points.forEach((p, i) => {
+      const x = padL + i * slot + (slot - bw) / 2;
+      if (p.v === null) {
+        if (p.why === 'rest') svg += `<circle cx="${x + bw / 2}" cy="${base - 4}" r="${Math.min(2.5, bw / 2)}" class="rest"/>`;
+        return;
+      }
+      const h = Math.max(p.v > 0 ? 3 : 0, p.v * plotH);
+      if (h <= 0) { svg += `<rect x="${x}" y="${base - 3}" width="${bw}" height="3" rx="1" class="zero"/>`; return; }
+      const top = base - h;
+      const r = Math.min(4, bw / 2, h);
+      svg += `<path class="bar${p.v >= 1 ? ' full' : ''}" data-i="${i}" d="M${x},${base} V${top + r} Q${x},${top} ${x + r},${top} H${x + bw - r} Q${x + bw},${top} ${x + bw},${top + r} V${base} Z"/>`;
+    });
+
+    // x labels: first, middle, today
+    const lab = (i, txt, anchor) => `<text x="${padL + i * slot + slot / 2}" y="${H - 8}" text-anchor="${anchor}" class="axis">${txt}</text>`;
+    svg += lab(0, shortDate(points[0].key), 'start');
+    if (n > 10) svg += lab(Math.floor((n - 1) / 2), shortDate(points[Math.floor((n - 1) / 2)].key), 'middle');
+    svg += lab(n - 1, 'Today', 'end');
+
+    // Hit targets: the whole column, bigger than the bar
+    points.forEach((p, i) => {
+      svg += `<rect class="hit" data-i="${i}" x="${padL + i * slot}" y="${padT}" width="${slot}" height="${plotH}"/>`;
+    });
+
+    const valued = points.filter((p) => p.v !== null);
+    const summary = valued.length
+      ? `Bar chart of ${valued.length} tracked days. Latest: ${Math.round(valued[valued.length - 1].v * 100)}%.`
+      : 'No history yet.';
+    wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${summary}">${svg}</svg>` +
+      (any ? '' : '<div class="chart-empty">Your history starts today 🌱<br>Come back in a few days to see it grow.</div>');
+    wrap._points = points;
+    $('chartTip').classList.remove('show');
+  }
+
+  function showTip(i) {
+    const wrap = $('chartWrap');
+    const points = wrap._points;
+    if (!points || !points[i]) return;
+    const p = points[i];
+    let text;
+    if (p.v === null) text = p.why === 'rest' ? 'Rest day: not scheduled' : 'No data';
+    else if (histSel === 'all') text = `${p.done} of ${p.total} done · ${Math.round(p.v * 100)}%`;
+    else if (p.total > 1) text = `${p.done} of ${p.total} times`;
+    else text = p.v >= 1 ? 'Done ✓' : 'Not done';
+    const tip = $('chartTip');
+    tip.innerHTML = `<strong>${longDate(p.key)}${p.key === today ? ' (today)' : ''}</strong><br>${text}`;
+    const hit = wrap.querySelector(`.hit[data-i="${i}"]`);
+    const card = tip.parentElement.getBoundingClientRect();
+    const hr = hit.getBoundingClientRect();
+    tip.classList.add('show');
+    const tw = tip.offsetWidth;
+    let left = hr.left - card.left + hr.width / 2 - tw / 2;
+    left = Math.max(8, Math.min(card.width - tw - 8, left));
+    tip.style.left = left + 'px';
+    wrap.querySelectorAll('.bar').forEach((b) => b.classList.toggle('dim', b.dataset.i !== String(i)));
+  }
+  function hideTip() {
+    $('chartTip').classList.remove('show');
+    $('chartWrap').querySelectorAll('.bar.dim').forEach((b) => b.classList.remove('dim'));
+  }
+
+  $('chartWrap').addEventListener('pointerdown', (e) => {
+    const hit = e.target.closest('.hit');
+    if (hit) showTip(Number(hit.dataset.i));
+  });
+  $('chartWrap').addEventListener('pointermove', (e) => {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const hit = el && el.closest && el.closest('.hit');
+    if (hit) showTip(Number(hit.dataset.i));
+  });
+  $('chartWrap').addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hideTip(); });
+
+  $('rangeSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-r]');
+    if (b) { histRange = Number(b.dataset.r); renderHistory(); }
+  });
+  const pickHabit = (e) => {
+    const b = e.target.closest('[data-h]');
+    if (!b) return;
+    histSel = b.dataset.h === histSel && b.dataset.h !== 'all' ? 'all' : b.dataset.h;
+    renderHistory();
+    if (b.closest('#habitRows')) $('historyPage').scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  $('habitChips').addEventListener('click', pickHabit);
+  $('habitRows').addEventListener('click', pickHabit);
+  window.addEventListener('resize', () => { if (histOpen) renderHistory(); });
 
   // ---------- Day rollover ----------
   function checkDay() {
