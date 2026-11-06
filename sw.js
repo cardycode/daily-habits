@@ -2,7 +2,7 @@
 // Offline support. When the phone is online, the app always loads the newest files
 // from the website (skipping the browser's own cache). When offline, or if the network
 // takes longer than 3 seconds, it falls back to the last saved copy.
-const CACHE = 'daily-habits-v7';
+const CACHE = 'daily-habits-v8';
 const SHELL = [
   './',
   'index.html',

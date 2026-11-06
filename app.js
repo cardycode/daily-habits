@@ -39,6 +39,16 @@
   const dayKeyNow = () => fmt(new Date(Date.now() - RESET_HOUR * 3600 * 1000));
   const addDays = (k, n) => { const d = parseKey(k); d.setDate(d.getDate() + n); return fmt(d); };
   const weekdayOf = (k) => parseKey(k).getDay();
+  const diffDays = (a, b) => Math.round((parseKey(b) - parseKey(a)) / 864e5); // b minus a, in days
+  const mondayOf = (k) => addDays(k, -((weekdayOf(k) + 6) % 7)); // weeks run Monday to Sunday
+
+  // How a task repeats:
+  // daily    every day
+  // days     on chosen weekdays
+  // interval every N days, or every N weeks on chosen weekdays
+  // weekly   N times a week, on any days; hidden once the week's number is reached
+  // once     a one-off on a date; carries over until done
+  const REPEATS = ['daily', 'days', 'interval', 'weekly', 'once'];
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -85,18 +95,27 @@
   function cleanItem(i) {
     if (!isObj(i) || typeof i.id !== 'string' || !ID_RE.test(i.id)) return null;
     if (typeof i.name !== 'string' || !i.name.trim()) return null;
-    const repeat = ['daily', 'days', 'once'].includes(i.repeat) ? i.repeat : 'daily';
-    const days = Array.isArray(i.days) ? [...new Set(i.days.filter((d) => clampInt(d, 0, 6) !== null))] : [];
+    let repeat = REPEATS.includes(i.repeat) ? i.repeat : 'daily';
+    let days = Array.isArray(i.days) ? [...new Set(i.days.filter((d) => clampInt(d, 0, 6) !== null))] : [];
+    const created = typeof i.created === 'string' && DATE_RE.test(i.created) ? i.created : today;
+    const start = typeof i.start === 'string' && DATE_RE.test(i.start) ? i.start : created;
+    const unit = i.unit === 'week' ? 'week' : 'day';
+    if (repeat === 'days' && !days.length) repeat = 'daily';
+    if (repeat === 'interval' && unit === 'week' && !days.length) days = [weekdayOf(start)];
     const item = {
       id: i.id,
       name: i.name.trim().slice(0, 60),
       emoji: typeof i.emoji === 'string' && i.emoji.length <= 16 && i.emoji.trim() ? i.emoji : '✨',
       color: COLORS.includes(i.color) ? i.color : 'pink',
-      repeat: repeat === 'days' && !days.length ? 'daily' : repeat,
-      days: repeat === 'days' ? days : [],
-      target: repeat === 'once' ? 1 : (clampInt(i.target, 1, 12) || 1),
+      repeat,
+      days: repeat === 'days' || (repeat === 'interval' && unit === 'week') ? days : [],
+      every: clampInt(i.every, 1, 60) || 2,
+      unit,
+      perWeek: clampInt(i.perWeek, 1, 7) || 3,
+      target: repeat === 'once' || repeat === 'weekly' ? 1 : (clampInt(i.target, 1, 12) || 1),
       time: typeof i.time === 'string' && TIME_RE.test(i.time) ? i.time : '',
-      created: typeof i.created === 'string' && DATE_RE.test(i.created) ? i.created : today,
+      created,
+      start,
     };
     if (repeat === 'once') item.doneOn = typeof i.doneOn === 'string' && DATE_RE.test(i.doneOn) ? i.doneOn : null;
     return item;
@@ -168,10 +187,41 @@
     if (item.repeat === 'once') item.doneOn = n >= item.target ? today : null;
   }
 
+  const startOf = (item) => item.start || item.created || today;
+
+  // Is the task scheduled on this day? (For "x a week" tasks, see weeklyOpen.)
   function isDue(item, key) {
-    if (item.repeat === 'days') return (item.days || []).includes(weekdayOf(key));
-    return true; // daily habits, and one-off tasks that stay until they're done
+    const start = startOf(item);
+    if (key < start) return false; // future tasks stay hidden until their date
+    switch (item.repeat) {
+      case 'days':
+        return (item.days || []).includes(weekdayOf(key));
+      case 'interval':
+        if (item.unit === 'week') {
+          const weeks = Math.round(diffDays(mondayOf(start), mondayOf(key)) / 7);
+          return (item.days || []).includes(weekdayOf(key)) && weeks % item.every === 0;
+        }
+        return diffDays(start, key) % item.every === 0;
+      default:
+        return true; // daily, weekly, and one-offs (which stay until done)
+    }
   }
+
+  // Days this week (Monday up to, not including, `key`) on which a weekly task was done
+  function weekDoneBefore(item, key) {
+    let n = 0;
+    for (let k = mondayOf(key); k < key; k = addDays(k, 1)) if (countOn(item, k) >= item.target) n++;
+    return n;
+  }
+  const weekDoneThrough = (item, key) => weekDoneBefore(item, key) + (countOn(item, key) >= item.target ? 1 : 0);
+
+  // A weekly task shows until the week's number is reached; on the day it's
+  // reached it sits in Done, then it's hidden until Monday.
+  function weeklyOpen(item, key) {
+    return isDue(item, key) && weekDoneBefore(item, key) < item.perWeek;
+  }
+
+  const isWeekly = (i) => i.repeat === 'weekly';
 
   // One-off tasks finished on an earlier day are cleared away at the 4 AM reset.
   // Unfinished ones carry over until you do them.
@@ -179,13 +229,28 @@
     state.items = state.items.filter((i) => !(i.repeat === 'once' && i.doneOn && i.doneOn !== today));
   }
 
+  // Weekly tasks: consecutive weeks that hit the number (this week counts once it's hit)
+  function weekStreak(item) {
+    let s = 0;
+    let mon = mondayOf(today);
+    if (weekDoneThrough(item, today) >= item.perWeek) s++;
+    mon = addDays(mon, -7);
+    for (let i = 0; i < 200 && addDays(mon, 6) >= startOf(item); i++) {
+      if (weekDoneThrough(item, addDays(mon, 6)) >= item.perWeek) s++;
+      else break;
+      mon = addDays(mon, -7);
+    }
+    return s;
+  }
+
   function streak(item) {
     if (item.repeat === 'once') return 0;
+    if (isWeekly(item)) return weekStreak(item);
     let s = 0;
     let key = today;
     if (isDue(item, key) && countOn(item, key) >= item.target) s++;
     key = addDays(key, -1);
-    for (let i = 0; i < 1000 && key >= (item.created || key); i++) {
+    for (let i = 0; i < 1000 && key >= startOf(item); i++) {
       if (isDue(item, key)) {
         if (countOn(item, key) >= item.target) s++;
         else break;
@@ -209,6 +274,19 @@
     return WEEK.filter((w) => days.includes(w.d)).map((w) => w.n).join(' · ');
   }
 
+  // Short description of how a task repeats, for the task card
+  function repeatLabel(item) {
+    switch (item.repeat) {
+      case 'days': return `📅 ${daysLabel(item.days)}`;
+      case 'interval':
+        if (item.unit === 'week') return `🔁 Every ${item.every === 1 ? '' : item.every + ' '}week${item.every === 1 ? '' : 's'} · ${daysLabel(item.days)}`;
+        return item.every === 2 ? '🔁 Every other day' : `🔁 Every ${item.every} days`;
+      case 'weekly': return `🗓️ ${item.perWeek}× a week`;
+      case 'once': return '📌 One-off';
+      default: return '';
+    }
+  }
+
   function cardHTML(item) {
     const c = count(item);
     const done = c >= item.target;
@@ -218,10 +296,16 @@
     if (multi) {
       meta.push(`<span class="dots">${Array.from({ length: item.target }, (_, i) => `<span class="dot${i < c ? ' on' : ''}"></span>`).join('')}</span>`);
     }
-    if (item.repeat === 'days') meta.push(`<span class="pill">📅 ${daysLabel(item.days)}</span>`);
-    if (item.repeat === 'once' && item.created && item.created < today && !done) meta.push('<span class="pill">↪️ from before</span>');
+    if (isWeekly(item)) {
+      const wk = weekDoneThrough(item, today);
+      meta.push(`<span class="dots">${Array.from({ length: item.perWeek }, (_, i) => `<span class="dot${i < wk ? ' on' : ''}"></span>`).join('')}</span>`);
+      meta.push(`<span class="pill">🗓️ ${wk}/${item.perWeek} this week</span>`);
+    }
+    const rl = repeatLabel(item);
+    if (rl && item.repeat !== 'weekly') meta.push(`<span class="pill">${rl}</span>`);
+    if (item.repeat === 'once' && startOf(item) < today && !done) meta.push('<span class="pill">↪️ from before</span>');
     const st = streak(item);
-    if (st >= 2) meta.push(`<span class="pill">🔥 ${st}</span>`);
+    if (st >= 2) meta.push(`<span class="pill">🔥 ${st}${isWeekly(item) ? ' wk' : ''}</span>`);
 
     let check;
     if (done) check = '<div class="check on">✓</div>';
@@ -242,29 +326,38 @@
       </div>`;
   }
 
-  function dueItems() { return state.items.filter((i) => isDue(i, today)); }
+  // Today's fixed list: everything scheduled today except the flexible "x a week" tasks.
+  // These drive the progress bar and the list-cleared celebration.
+  function dueItems() { return state.items.filter((i) => !isWeekly(i) && isDue(i, today)); }
+  // Flexible "x a week" tasks still open this week
+  function flexItems() { return state.items.filter((i) => isWeekly(i) && weeklyOpen(i, today)); }
 
   function render() {
     const due = dueItems();
+    const flex = flexItems();
     const active = due.filter((i) => count(i) < i.target);
-    const done = due.filter((i) => count(i) >= i.target);
+    const done = due.concat(flex).filter((i) => count(i) >= i.target);
     const habits = active.filter((i) => i.repeat !== 'once');
     const tasks = active.filter((i) => i.repeat === 'once');
+    const flexActive = flex.filter((i) => count(i) < i.target);
 
     let html = '';
     if (!state.items.length) {
       html = `<div class="empty"><div class="empty-emoji">🌱</div><h2>A fresh start</h2><p>Tap + to add your first habit or task.</p></div>`;
-    } else if (!due.length) {
+    } else if (!due.length && !flex.length) {
       html = `<div class="empty"><div class="empty-emoji">🌤️</div><h2>Nothing planned today</h2><p>Enjoy it, or tap + to add something.</p></div>`;
     } else {
-      if (!active.length) {
+      if (due.length && !active.length) {
         html += `<div class="empty"><div class="empty-emoji">🏆</div><h2>All done for today!</h2><p>Your list is empty. That's the whole point.</p></div>`;
       }
       if (habits.length) html += `<div class="section-title">Habits</div>` + habits.map(cardHTML).join('');
-      if (tasks.length) html += `<div class="section-title">Today only</div>` + tasks.map(cardHTML).join('');
+      if (tasks.length) html += `<div class="section-title">One-offs</div>` + tasks.map(cardHTML).join('');
+      if (flexActive.length) {
+        html += `<div class="section-title">This week <span class="section-note">any day before Sunday</span></div>` + flexActive.map(cardHTML).join('');
+      }
       if (done.length) {
         html += `<button type="button" class="done-toggle${doneOpen ? ' open' : ''}" id="doneToggle" aria-expanded="${doneOpen}">
-          <span class="chev">▸</span> Done (${done.length}) ${done.length === due.length ? '🏆' : '🎉'}</button>`;
+          <span class="chev">▸</span> Done (${done.length}) ${due.length && !active.length ? '🏆' : '🎉'}</button>`;
         if (doneOpen) html += done.map(cardHTML).join('');
       }
     }
@@ -336,7 +429,7 @@
       return;
     }
 
-    const wasAllDone = dueItems().every((i) => count(i) >= i.target);
+    const wasAllDone = dueItems().every((i) => count(i) >= i.target) || isWeekly(item);
     const next = before + 1;
     setCount(item, next);
     save();
@@ -351,7 +444,12 @@
       save();
       render();
     };
-    showToast(finished ? `${item.emoji} ${item.name} done!` : `${item.emoji} ${item.name} ${next}/${item.target}`, undo);
+    let msg = finished ? `${item.emoji} ${item.name} done!` : `${item.emoji} ${item.name} ${next}/${item.target}`;
+    if (isWeekly(item) && finished) {
+      const wk = weekDoneThrough(item, today);
+      msg = wk >= item.perWeek ? `${item.emoji} ${item.name}: ${wk}/${item.perWeek}. Week smashed! 🎯` : `${item.emoji} ${item.name}: ${wk}/${item.perWeek} this week`;
+    }
+    showToast(msg, undo);
 
     const allDoneNow = dueItems().every((i) => count(i) >= i.target);
     if (finished && cardEl) {
@@ -561,12 +659,14 @@
   function openEdit(id) {
     const item = id ? find(id) : null;
     editingId = item ? item.id : null;
+    const defaults = { every: 2, unit: 'day', perWeek: 3, start: today };
     draft = item
-      ? { ...item, days: [...(item.days || [])] }
-      : { name: '', emoji: '✨', color: COLORS[Math.floor(Math.random() * COLORS.length)], repeat: 'daily', days: [], target: 1, time: '' };
+      ? { ...defaults, ...item, days: [...(item.days || [])], start: startOf(item) }
+      : { ...defaults, name: '', emoji: '✨', color: COLORS[Math.floor(Math.random() * COLORS.length)], repeat: 'daily', days: [], target: 1, time: '' };
     $('editTitle').textContent = item ? 'Edit' : 'New task';
     $('nameInput').value = draft.name;
     $('timeInput').value = draft.time || '';
+    $('startInput').value = draft.start;
     $('emojiCustom').value = '';
     $('emojiPanel').hidden = true;
     $('editExtra').hidden = !item;
@@ -584,11 +684,40 @@
       b.classList.toggle('sel', on);
       b.setAttribute('aria-pressed', String(on));
     });
-    $('dayChips').hidden = draft.repeat !== 'days';
+    const r = draft.repeat;
+    const weekInterval = r === 'interval' && draft.unit === 'week';
+    $('dayChips').hidden = !(r === 'days' || weekInterval);
     $('dayChips').innerHTML = WEEK.map((w) =>
       `<button type="button" class="day-chip${draft.days.includes(w.d) ? ' sel' : ''}" data-d="${w.d}" aria-label="${w.n}" aria-pressed="${draft.days.includes(w.d)}">${w.l}</button>`).join('');
-    $('timesField').hidden = draft.repeat === 'once';
+    $('intervalBox').hidden = r !== 'interval';
+    $('everyVal').textContent = draft.every;
+    $('unitSeg').querySelectorAll('button').forEach((b) => {
+      const on = b.dataset.u === draft.unit;
+      b.classList.toggle('sel', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    $('weeklyBox').hidden = r !== 'weekly';
+    $('perVal').textContent = draft.perWeek;
+    $('timesField').hidden = r === 'once' || r === 'weekly';
     $('timesVal').textContent = draft.target;
+    $('startLabel').textContent = r === 'once' ? 'Date' : r === 'interval' ? 'Starts (first time)' : 'Starts';
+    $('repeatHint').textContent = scheduleHint();
+  }
+
+  // Plain-language preview of when the task will show up, so the choice is easy to check
+  function scheduleHint() {
+    const start = DATE_RE.test($('startInput').value) ? $('startInput').value : today;
+    const from = start > today ? start : today;
+    const nice = (k) => (k === today ? 'today' : k === addDays(today, 1) ? 'tomorrow' : longDate(k));
+    if (draft.repeat === 'once') return start <= today ? 'Shows today and stays until it’s done.' : `Shows on ${nice(start)}, then stays until it’s done.`;
+    if (draft.repeat === 'weekly') {
+      return `Any ${draft.perWeek} day${draft.perWeek === 1 ? '' : 's'} each week, Monday to Sunday. Hides until Monday once done ${draft.perWeek}×.`;
+    }
+    const probe = { ...draft, start, days: draft.days };
+    const next = [];
+    for (let k = from, i = 0; i < 400 && next.length < 3; i++, k = addDays(k, 1)) if (isDue(probe, k)) next.push(nice(k));
+    if (!next.length) return draft.repeat === 'daily' ? '' : 'Pick at least one day.';
+    return `Next: ${next.join(', ')}…`;
   }
 
   function buildEmojiGrid() {
@@ -626,8 +755,24 @@
     if (!b) return;
     draft.repeat = b.dataset.v;
     if (draft.repeat === 'days' && !draft.days.length) draft.days = [weekdayOf(today)];
+    if (draft.repeat === 'interval' && draft.unit === 'week' && !draft.days.length) draft.days = [weekdayOf(draft.start || today)];
     syncEdit();
   });
+  $('unitSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-u]');
+    if (!b) return;
+    draft.unit = b.dataset.u;
+    if (draft.unit === 'week' && !draft.days.length) {
+      const s = $('startInput').value;
+      draft.days = [weekdayOf(DATE_RE.test(s) ? s : today)];
+    }
+    syncEdit();
+  });
+  $('everyMinus').addEventListener('click', () => { draft.every = Math.max(1, draft.every - 1); syncEdit(); });
+  $('everyPlus').addEventListener('click', () => { draft.every = Math.min(60, draft.every + 1); syncEdit(); });
+  $('perMinus').addEventListener('click', () => { draft.perWeek = Math.max(1, draft.perWeek - 1); syncEdit(); });
+  $('perPlus').addEventListener('click', () => { draft.perWeek = Math.min(7, draft.perWeek + 1); syncEdit(); });
+  $('startInput').addEventListener('change', syncEdit);
   $('dayChips').addEventListener('click', (e) => {
     const b = e.target.closest('[data-d]');
     if (!b) return;
@@ -650,17 +795,23 @@
       inp.focus();
       return;
     }
-    if (draft.repeat === 'days' && !draft.days.length) {
+    const weekInterval = draft.repeat === 'interval' && draft.unit === 'week';
+    if ((draft.repeat === 'days' || weekInterval) && !draft.days.length) {
       showToast('Pick at least one day 📅');
       return;
     }
     if (draft.repeat === 'days' && draft.days.length === 7) { draft.repeat = 'daily'; draft.days = []; }
-    if (draft.repeat !== 'days') draft.days = [];
-    if (draft.repeat === 'once') draft.target = 1;
+    if (draft.repeat === 'interval' && draft.unit === 'day' && draft.every === 1) draft.repeat = 'daily';
+    if (draft.repeat === 'weekly' && draft.perWeek === 7) draft.repeat = 'daily';
+    if (!(draft.repeat === 'days' || (draft.repeat === 'interval' && draft.unit === 'week'))) draft.days = [];
+    if (draft.repeat === 'once' || draft.repeat === 'weekly') draft.target = 1;
+    const startVal = $('startInput').value;
+    const start = DATE_RE.test(startVal) ? startVal : today;
 
     const fields = {
       name, emoji: draft.emoji, color: draft.color, repeat: draft.repeat,
       days: draft.days, target: draft.target, time: $('timeInput').value || '',
+      every: draft.every, unit: draft.unit, perWeek: draft.perWeek, start,
     };
 
     if (editingId) {
@@ -673,10 +824,10 @@
         // Clamp today's count if the target was lowered
         if (count(item) > item.target) setCount(item, item.target);
       }
-      showToast(`${fields.emoji} Saved`);
+      showToast(start > today ? `${fields.emoji} Saved. Starts ${longDate(start)} 📅` : `${fields.emoji} Saved`);
     } else {
       state.items.push({ id: uid(), created: today, doneOn: null, ...fields });
-      showToast(`${fields.emoji} ${name} added`);
+      showToast(start > today ? `${fields.emoji} ${name} added for ${longDate(start)} 📅` : `${fields.emoji} ${name} added`);
     }
     save();
     closeSheet();
@@ -764,6 +915,58 @@
     }
   });
 
+  // ---------- Tomorrow peek ----------
+  // A read-only look at tomorrow's list, so you can prepare the night before.
+  function openTomorrow() {
+    const tk = addDays(today, 1);
+    const byTime = (a, b) => (a.time || '99:99').localeCompare(b.time || '99:99');
+    const due = state.items.filter((i) => !isWeekly(i) && isDue(i, tk) && !(i.repeat === 'once' && i.doneOn));
+    const special = due.filter((i) => i.repeat !== 'daily').sort(byTime);
+    const everyday = due.filter((i) => i.repeat === 'daily').sort(byTime);
+    const newWeek = weekdayOf(tk) === 1;
+    const flex = state.items.filter((i) => isWeekly(i) && isDue(i, tk) && (newWeek ? 0 : weekDoneThrough(i, today)) < i.perWeek);
+
+    const row = (i, extra) => {
+      const pills = [];
+      if (i.time) pills.push(`<span class="pill">⏰ ${fmtTime(i.time)}</span>`);
+      if (extra) pills.push(`<span class="pill">${extra}</span>`);
+      return `
+        <div class="peek-row c-${esc(i.color)}">
+          <span class="card-emoji">${esc(i.emoji)}</span>
+          <span class="peek-text">
+            <span class="peek-name">${esc(i.name)}</span>
+            ${pills.length ? `<span class="card-meta">${pills.join('')}</span>` : ''}
+          </span>
+        </div>`;
+    };
+
+    let html = `<p class="hint">${longDate(tk)}. Anything to get ready tonight?</p>`;
+    if (!special.length && !flex.length && !everyday.length) {
+      html += `<div class="peek-empty">🌤️ Nothing planned for tomorrow.</div>`;
+    }
+    if (special.length) {
+      html += `<div class="section-title">✨ Not every day</div>` + special.map((i) => {
+        const carried = i.repeat === 'once' && startOf(i) <= today;
+        return row(i, carried ? '↪️ if not done today' : repeatLabel(i));
+      }).join('');
+    } else if (everyday.length || flex.length) {
+      html += `<div class="peek-empty">Nothing unusual tomorrow. Just your regular habits.</div>`;
+    }
+    if (flex.length) {
+      html += `<div class="section-title">🗓️ Still to do this week</div>` + flex.map((i) => {
+        const left = i.perWeek - (newWeek ? 0 : weekDoneThrough(i, today));
+        return row(i, newWeek ? `New week: ${i.perWeek}× to do` : `${left} more this week`);
+      }).join('');
+    }
+    if (everyday.length) {
+      html += `<div class="section-title">Every day</div><div class="peek-chips">` +
+        everyday.map((i) => `<span class="peek-chip">${esc(i.emoji)} ${esc(i.name)}${i.time ? ` · ${fmtTime(i.time)}` : ''}</span>`).join('') + '</div>';
+    }
+    $('tomorrowBody').innerHTML = html;
+    openSheet($('tomorrowSheet'));
+  }
+  $('tomorrowBtn').addEventListener('click', openTomorrow);
+
   // ---------- History page ----------
   let histRange = 30;
   let histSel = 'all'; // 'all' or an item id
@@ -778,6 +981,11 @@
     const snap = state.snap[key];
     const log = state.log[key] || {};
     if (!snap) return { key, v: null, why: 'none' };
+    const selItem = sel === 'all' ? null : find(sel);
+    if (selItem && isWeekly(selItem)) {
+      // Flexible tasks aren't on a fixed day, so a day without it isn't a miss
+      return (log[sel] || 0) >= 1 ? { key, v: 1, done: 1, total: 1 } : { key, v: null, why: 'flex' };
+    }
     if (sel === 'all') {
       const ids = Object.keys(snap);
       if (!ids.length) return { key, v: null, why: 'empty' };
@@ -797,6 +1005,17 @@
   }
 
   function bestStreak(id) {
+    const item = find(id);
+    if (item && isWeekly(item)) {
+      let run = 0;
+      let best = 0;
+      const thisMon = mondayOf(today);
+      for (let mon = mondayOf(startOf(item)), i = 0; mon <= thisMon && i < 520; mon = addDays(mon, 7), i++) {
+        const hit = weekDoneThrough(item, mon === thisMon ? today : addDays(mon, 6)) >= item.perWeek;
+        if (hit) { run++; best = Math.max(best, run); } else if (mon !== thisMon) run = 0;
+      }
+      return best;
+    }
     const keys = Object.keys(state.snap).sort();
     let run = 0;
     let best = 0;
@@ -855,12 +1074,15 @@
     } else {
       const item = find(histSel);
       const fullDays = valued.filter((p) => p.v >= 1).length;
+      const wk = isWeekly(item);
       tiles = [
-        ['Done', `${fullDays} of ${valued.length} days`],
-        ['Streak now', `🔥 ${streak(item)}`],
-        ['Best streak', `🏆 ${bestStreak(item.id)}`],
+        wk ? ['Done', `${fullDays}× in ${histRange} days`] : ['Done', `${fullDays} of ${valued.length} days`],
+        ['Streak now', `🔥 ${streak(item)}${wk ? ' wk' : ''}`],
+        ['Best streak', `🏆 ${bestStreak(item.id)}${wk ? ' wk' : ''}`],
       ];
-      $('chartTitle').textContent = item.target > 1
+      $('chartTitle').textContent = wk
+        ? `${item.emoji} ${item.name}: days done (aim ${item.perWeek}× a week)`
+        : item.target > 1
         ? `${item.emoji} ${item.name}: share of ${item.target} times done each day`
         : `${item.emoji} ${item.name}: done each day`;
     }
@@ -871,7 +1093,12 @@
     // Per-habit rows: completion rate over the selected range
     $('habitRows').innerHTML = habits.length ? habits.map((h) => {
       const ps = keys.map((k) => dayPoint(k, h.id)).filter((p) => p.v !== null);
-      const rate = ps.length ? Math.round((ps.filter((p) => p.v >= 1).length / ps.length) * 100) : null;
+      let rate = ps.length ? Math.round((ps.filter((p) => p.v >= 1).length / ps.length) * 100) : null;
+      if (isWeekly(h)) {
+        // Times done against the weekly aim, over the weeks in the range
+        const weeks = new Set(keys.filter((k) => k >= startOf(h)).map(mondayOf)).size;
+        rate = weeks ? Math.min(100, Math.round((ps.length / (weeks * h.perWeek)) * 100)) : null;
+      }
       const st = streak(h);
       return `
         <button type="button" class="hrow c-${esc(h.color)}${histSel === h.id ? ' sel' : ''}" data-h="${esc(h.id)}">
@@ -949,7 +1176,7 @@
     if (!points || !points[i]) return;
     const p = points[i];
     let text;
-    if (p.v === null) text = p.why === 'rest' ? 'Rest day: not scheduled' : 'No data';
+    if (p.v === null) text = p.why === 'rest' ? 'Rest day: not scheduled' : p.why === 'flex' ? 'Not done that day (flexible)' : 'No data';
     else if (histSel === 'all') text = `${p.done} of ${p.total} done · ${Math.round(p.v * 100)}%`;
     else if (p.total > 1) text = `${p.done} of ${p.total} times`;
     else text = p.v >= 1 ? 'Done ✓' : 'Not done';

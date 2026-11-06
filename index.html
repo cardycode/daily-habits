@@ -24,6 +24,7 @@
           <h1 class="date" id="dateLabel"></h1>
         </div>
         <div class="top-actions">
+          <button class="icon-btn" id="tomorrowBtn" type="button" aria-label="Peek at tomorrow">👀</button>
           <button class="icon-btn" id="historyBtn" type="button" aria-label="History">📈</button>
           <button class="icon-btn" id="settingsBtn" type="button" aria-label="Look and backup">🎨</button>
         </div>
@@ -67,12 +68,44 @@
 
     <div class="field">
       <div class="label">Repeats</div>
-      <div class="seg" id="repeatSeg">
+      <div class="repeat-grid" id="repeatSeg">
         <button type="button" data-v="daily">Every day</button>
-        <button type="button" data-v="days">Some days</button>
-        <button type="button" data-v="once">Today only</button>
+        <button type="button" data-v="days">Set days</button>
+        <button type="button" data-v="interval">Every few…</button>
+        <button type="button" data-v="weekly">× a week</button>
+        <button type="button" data-v="once">One-off</button>
       </div>
+
+      <div class="sub-row" id="intervalBox" hidden>
+        <span class="sub-word">Every</span>
+        <div class="stepper small">
+          <button type="button" id="everyMinus" aria-label="Fewer">−</button>
+          <span id="everyVal">2</span>
+          <button type="button" id="everyPlus" aria-label="More">+</button>
+        </div>
+        <div class="seg unit-seg" id="unitSeg">
+          <button type="button" data-u="day">days</button>
+          <button type="button" data-u="week">weeks</button>
+        </div>
+      </div>
+
       <div class="day-chips" id="dayChips" hidden></div>
+
+      <div class="sub-row" id="weeklyBox" hidden>
+        <div class="stepper small">
+          <button type="button" id="perMinus" aria-label="Fewer">−</button>
+          <span id="perVal">3</span>
+          <button type="button" id="perPlus" aria-label="More">+</button>
+        </div>
+        <span class="sub-word">times a week, any days</span>
+      </div>
+
+      <p class="repeat-hint" id="repeatHint"></p>
+    </div>
+
+    <div class="field">
+      <label class="label" for="startInput" id="startLabel">Starts</label>
+      <input id="startInput" type="date">
     </div>
 
     <div class="field" id="timesField">
@@ -100,6 +133,13 @@
     </div>
   </section>
 
+  <!-- Tomorrow peek sheet -->
+  <section class="sheet" id="tomorrowSheet" role="dialog" aria-modal="true" aria-labelledby="tomorrowTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="tomorrowTitle">Tomorrow</h2>
+    <div id="tomorrowBody"></div>
+  </section>
+
   <!-- Settings sheet -->
   <section class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="sheet-handle"></div>
@@ -120,7 +160,7 @@
       </div>
     </div>
 
-    <p class="hint small">The list resets every day at 4 AM. Tap a task to tick it. Hold a task to edit it. Swipe a task left to delete it.</p>
+    <p class="hint small">The list resets every day at 4 AM. Tap 👀 to peek at tomorrow. Tap a task to tick it. Hold a task to edit it. Swipe a task left to delete it.</p>
     <p class="copyright">© 2026 Carol Morris. All rights reserved.</p>
   </section>
 

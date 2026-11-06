@@ -89,18 +89,19 @@
 
 /* Mono: black, white, and grey only. Each "colour" choice becomes a different grey. */
 [data-theme="neutral"] {
-  --bg: #f4f4f4;
-  --bg2: #ebebeb;
+  --bg: #ffffff;
+  --bg2: #ffffff;
   --surface: #ffffff;
-  --text: #111111;
-  --muted: #6b6b6b;
-  --line: #e0e0e0;
-  --accent: #111111;
-  --accent2: #555555;
-  --chart: #111111;
+  --text: #000000;
+  --muted: #555555;
+  --line: #d6d6d6;
+  --accent: #000000;
+  --accent2: #333333;
+  --chart: #000000;
+  --fill: #f0f0f0;
   --tint: 16%;
   --card-text: var(--text);
-  --shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+  --shadow: none;
 
   --pink: #9a9a9a;
   --peach: #7a7a7a;
@@ -111,7 +112,45 @@
   --coral: #8a8a8a;
   --teal: #3d3d3d;
 }
-[data-theme="neutral"] .check.on { background: #111111; border-color: #111111; }
+/* Neutral: white page; tasks get a grey fill and grey border; text and tick boxes are black */
+[data-theme="neutral"] .card,
+[data-theme="neutral"] .peek-row { --k: #000000; }
+[data-theme="neutral"] .card-body,
+[data-theme="neutral"] .peek-row { background: var(--fill); border: 1.5px solid #cccccc; box-shadow: none; color: #000000; }
+[data-theme="neutral"] .card-emoji,
+[data-theme="neutral"] .pill { background: #ffffff; }
+[data-theme="neutral"] .check { border-color: #000000; background: #ffffff; color: #000000; }
+[data-theme="neutral"] .check.multi {
+  background:
+    radial-gradient(closest-side, #ffffff 76%, transparent 78%),
+    conic-gradient(#000000 calc(var(--p) * 1%), #cccccc 0);
+}
+[data-theme="neutral"] .check.on { background: #000000; border-color: #000000; color: #ffffff; }
+[data-theme="neutral"] .progress { background: #e6e6e6; }
+[data-theme="neutral"] .progress-fill { background: #000000; }
+[data-theme="neutral"] .seg,
+[data-theme="neutral"] .repeat-grid,
+[data-theme="neutral"] .stepper,
+[data-theme="neutral"] .emoji-panel,
+[data-theme="neutral"] .ghost-btn { background: var(--fill); }
+[data-theme="neutral"] .seg button.sel,
+[data-theme="neutral"] .repeat-grid button.sel { background: #ffffff; box-shadow: 0 0 0 1.5px #000000; }
+[data-theme="neutral"] .icon-btn,
+[data-theme="neutral"] .stat,
+[data-theme="neutral"] .chart-card,
+[data-theme="neutral"] .hrow,
+[data-theme="neutral"] .empty,
+[data-theme="neutral"] .done-toggle,
+[data-theme="neutral"] .theme-opt,
+[data-theme="neutral"] .stepper button { border: 1.5px solid #d6d6d6; }
+[data-theme="neutral"] .hrow.sel { border-color: #000000; }
+[data-theme="neutral"] .hrow-bar { background: #e6e6e6; }
+[data-theme="neutral"] .hrow-bar span { background: #000000; }
+[data-theme="neutral"] .hrow-emoji { background: var(--fill); }
+[data-theme="neutral"] .fab,
+[data-theme="neutral"] .primary-btn { background: #000000; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25); }
+[data-theme="neutral"] .sheet { box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.18); }
+[data-theme="neutral"] .theme-opt.sel { border-color: #000000; }
 [data-theme="neutral"] .card-emoji,
 [data-theme="neutral"] .icon-btn,
 [data-theme="neutral"] .pill,
@@ -121,6 +160,9 @@
 [data-theme="neutral"] .empty-emoji,
 [data-theme="neutral"] .celebrate-emoji,
 [data-theme="neutral"] .chip,
+[data-theme="neutral"] .peek-chip,
+[data-theme="neutral"] .section-title,
+[data-theme="neutral"] .repeat-hint,
 [data-theme="neutral"] .stat-value,
 [data-theme="neutral"] .hrow-emoji,
 [data-theme="neutral"] .hrow-streak,
@@ -432,7 +474,48 @@ input { font: inherit; color: var(--text); }
 .copyright { margin: 22px 0 0; text-align: center; font-size: 12px; font-weight: 500; color: var(--muted); }
 
 /* ---------- Header actions ---------- */
-.top-actions { display: flex; gap: 10px; }
+.top-actions { display: flex; gap: 8px; }
+.top-actions .icon-btn { width: 42px; height: 42px; font-size: 20px; }
+
+/* ---------- Repeat options in the add/edit sheet ---------- */
+.repeat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 16px; background: var(--bg); }
+.repeat-grid button {
+  padding: 11px 4px; border-radius: 12px; font-weight: 600; font-size: 14px; color: var(--muted);
+  transition: background 0.2s, color 0.2s;
+}
+.repeat-grid button.sel { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+[data-theme="neon"] .repeat-grid button.sel { background: color-mix(in srgb, var(--accent) 25%, var(--surface)); }
+.sub-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.sub-row[hidden] { display: none; }
+.sub-word { font-weight: 600; font-size: 15px; }
+.stepper.small button { width: 40px; height: 40px; font-size: 20px; }
+.stepper.small span { min-width: 36px; font-size: 18px; }
+.unit-seg { flex: 1; min-width: 150px; }
+.repeat-hint { margin: 10px 2px 0; font-size: 13px; font-weight: 500; color: var(--muted); line-height: 1.45; }
+.repeat-hint:empty { display: none; }
+#startInput {
+  width: 100%; padding: 15px 16px; border-radius: 16px; font-size: 17px; font-weight: 500;
+  border: 2px solid var(--line); background: var(--bg); color: var(--text); outline: none;
+}
+#startInput:focus { border-color: var(--accent); }
+[data-theme="neon"] #startInput { color-scheme: dark; }
+.section-note { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 6px; }
+
+/* ---------- Tomorrow peek ---------- */
+.peek-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 8px; padding: 10px 12px; border-radius: 18px;
+  background: color-mix(in srgb, var(--k) var(--tint), var(--surface)); color: var(--card-text);
+  border: 1.5px solid color-mix(in srgb, var(--k) 25%, transparent);
+}
+[data-theme="neon"] .peek-row { border-color: color-mix(in srgb, var(--k) 70%, transparent); }
+.peek-row .card-emoji { width: 40px; height: 40px; font-size: 22px; }
+.peek-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.peek-name { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.peek-empty { margin: 14px 0 4px; padding: 14px; border-radius: 16px; background: var(--bg); color: var(--muted); font-weight: 500; text-align: center; }
+[data-theme="neutral"] .peek-empty { background: var(--fill); }
+.peek-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.peek-chip { padding: 6px 10px; border-radius: 99px; background: var(--bg); border: 1.5px solid var(--line); font-size: 13px; font-weight: 500; }
+#tomorrowSheet .section-title { margin-top: 18px; }
 body.no-scroll { overflow: hidden; }
 
 /* ---------- History page ---------- */
